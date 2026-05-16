@@ -45,6 +45,11 @@ function showSection(section) {
     if (section === 'crawl') {
         loadCrawlKeywords();
     }
+    
+    // 如果切换到文件浏览，重新加载文件树
+    if (section === 'files') {
+        loadFileTree();
+    }
 }
 
 // ==================== 登录功能 ====================
@@ -372,20 +377,24 @@ function renderFileTree(items) {
     
     items.forEach(item => {
         if (item.type === 'folder') {
+            const isEmpty = !item.children || item.children.length === 0;
             html += `
                 <div class="tree-item py-1">
-                    <div onclick="toggleFolder(this)" class="flex items-center px-2 py-1 rounded hover:bg-gray-100">
-                        <span class="tree-toggle text-gray-400">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                            </svg>
-                        </span>
-                        <span class="text-yellow-500 mr-2">
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
-                            </svg>
-                        </span>
-                        <span class="font-medium text-gray-700">${item.name}</span>
+                    <div class="flex items-center px-2 py-1 rounded hover:bg-gray-100">
+                        <div onclick="toggleFolder(this)" class="flex items-center flex-1">
+                            <span class="tree-toggle text-gray-400">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                </svg>
+                            </span>
+                            <span class="text-yellow-500 mr-2">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
+                                </svg>
+                            </span>
+                            <span class="font-medium text-gray-700">${item.name}</span>
+                        </div>
+                        ${isEmpty ? `<button onclick="deleteFileOrFolder('${item.path}', 'folder', event)" class="text-red-500 hover:text-red-700 p-1" title="删除空目录">🗑️</button>` : ''}
                     </div>
                     <div class="tree-children">
                         ${item.children ? renderFileTree(item.children) : ''}
@@ -396,14 +405,17 @@ function renderFileTree(items) {
             const fileSize = (item.size / 1024).toFixed(2) + ' KB';
             html += `
                 <div class="tree-item py-1">
-                    <div onclick="downloadFile('${item.path}')" class="flex items-center px-2 py-1 rounded hover:bg-gray-100 ml-6">
-                        <span class="text-green-500 mr-2">
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd"></path>
-                            </svg>
-                        </span>
-                        <span class="text-gray-700">${item.name}</span>
-                        <span class="ml-auto text-xs text-gray-400">${fileSize}</span>
+                    <div class="flex items-center px-2 py-1 rounded hover:bg-gray-100 ml-6">
+                        <div onclick="downloadFile('${item.path}')" class="flex items-center flex-1">
+                            <span class="text-green-500 mr-2">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd"></path>
+                                </svg>
+                            </span>
+                            <span class="text-gray-700">${item.name}</span>
+                            <span class="ml-auto text-xs text-gray-400 mr-2">${fileSize}</span>
+                        </div>
+                        <button onclick="deleteFileOrFolder('${item.path}', 'file', event)" class="text-red-500 hover:text-red-700 p-1" title="删除文件">🗑️</button>
                     </div>
                 </div>
             `;
@@ -411,6 +423,35 @@ function renderFileTree(items) {
     });
     
     return html;
+}
+
+async function deleteFileOrFolder(path, type, event) {
+    event.stopPropagation();
+    
+    const itemType = type === 'folder' ? '目录' : '文件';
+    const itemName = path.split('/').pop();
+    
+    if (!confirm(`确定要删除${itemType} "${itemName}" 吗？${type === 'folder' ? '注意：只能删除空目录。' : ''}`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/files/delete?path=${encodeURIComponent(path)}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            showToast(result.message || '删除成功');
+            await loadFileTree();
+        } else {
+            const error = await response.json();
+            showToast(error.detail || '删除失败', 'error');
+        }
+    } catch (error) {
+        console.error('删除失败:', error);
+        showToast('删除失败，请重试', 'error');
+    }
 }
 
 function toggleFolder(element) {

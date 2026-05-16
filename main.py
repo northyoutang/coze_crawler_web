@@ -324,6 +324,7 @@ def scan_directory(path: str, relative_path: str = ""):
                 children.append(FileNode(
                     name=item,
                     type="folder",
+                    path=item_relative,
                     children=scan_directory(item_path, item_relative)
                 ))
             elif item.endswith('.xlsx'):
@@ -375,6 +376,33 @@ async def download_file(path: str, auth: bool = Depends(require_auth)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=filename
     )
+
+
+@app.delete("/api/files/delete")
+async def delete_file(path: str, auth: bool = Depends(require_auth)):
+    """删除文件或空目录"""
+    # 安全检查：防止路径遍历攻击
+    if '..' in path or path.startswith('/') or path.startswith('\\'):
+        raise HTTPException(status_code=400, detail="非法路径")
+    
+    # 将 URL 路径的正斜杠转换为系统路径
+    normalized_path = path.replace('/', os.sep)
+    file_path = os.path.join("data", normalized_path) if not normalized_path.startswith("data") else normalized_path
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    if os.path.isfile(file_path):
+        # 删除文件
+        os.remove(file_path)
+        return {"success": True, "message": f"已删除文件: {path}"}
+    elif os.path.isdir(file_path):
+        # 删除空目录
+        if len(os.listdir(file_path)) == 0:
+            os.rmdir(file_path)
+            return {"success": True, "message": f"已删除空目录: {path}"}
+        else:
+            raise HTTPException(status_code=400, detail="目录不为空，无法删除")
 
 
 if __name__ == "__main__":
