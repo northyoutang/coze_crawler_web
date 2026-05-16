@@ -1,0 +1,600 @@
+// 全局变量
+let currentSection = 'keywords';
+let progressInterval = null;
+
+// 页面初始化
+document.addEventListener('DOMContentLoaded', function() {
+    if (window.location.pathname === '/') {
+        loadKeywords();
+        loadSchedulerSettings();
+        loadSchedulerStatus();
+        loadFileTree();
+        updateStatusInfo();
+        refreshTokenStatus();  // 初始化Token状态
+        
+        // 每30秒更新一次状态
+        setInterval(updateStatusInfo, 30000);
+        // 每分钟刷新Token状态
+        setInterval(refreshTokenStatus, 60000);
+    }
+});
+
+// ==================== 导航功能 ====================
+
+function showSection(section) {
+    // 隐藏所有section
+    document.querySelectorAll('.section-content').forEach(el => {
+        el.classList.add('hidden');
+    });
+    
+    // 显示选中的section
+    document.getElementById(section + '-section').classList.remove('hidden');
+    
+    // 更新菜单激活状态
+    document.querySelectorAll('.menu-btn').forEach(btn => {
+        btn.classList.remove('bg-indigo-50', 'text-indigo-600');
+        btn.classList.add('hover:bg-gray-100', 'text-gray-700');
+    });
+    
+    const activeBtn = document.querySelector(`.menu-btn[data-section="${section}"]`);
+    if (activeBtn) {
+        activeBtn.classList.remove('hover:bg-gray-100', 'text-gray-700');
+        activeBtn.classList.add('bg-indigo-50', 'text-indigo-600');
+    }
+    
+    currentSection = section;
+    
+    // 如果切换到爬取页面，加载关键词选项
+    if (section === 'crawl') {
+        loadCrawlKeywords();
+    }
+}
+
+// ==================== 登录功能 ====================
+
+async function logout() {
+    try {
+        await fetch('/api/logout', { method: 'POST' });
+        window.location.href = '/login';
+    } catch (error) {
+        console.error('登出失败:', error);
+    }
+}
+
+// ==================== Toast 提示 ====================
+
+function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 z-50 ${
+        type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+    }`;
+    
+    toast.classList.remove('translate-y-20', 'opacity-0');
+    
+    setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+    }, 3000);
+}
+
+// ==================== 主题词管理 ====================
+
+async function loadKeywords() {
+    try {
+        const response = await fetch('/api/keywords');
+        const keywords = await response.json();
+        
+        const tableBody = document.getElementById('keywordsTable');
+        tableBody.innerHTML = '';
+        
+        keywords.forEach(kw => {
+            const createdDate = new Date(kw.created_at).toLocaleString('zh-CN');
+            tableBody.innerHTML += `
+                <tr>
+                    <td class="px-4 py-3 text-gray-800">${kw.id}</td>
+                    <td class="px-4 py-3 text-gray-800 font-medium">${kw.keyword}</td>
+                    <td class="px-4 py-3 text-gray-600">${createdDate}</td>
+                    <td class="px-4 py-3">
+                        <button onclick="editKeyword(${kw.id}, '${kw.keyword}')" class="text-blue-600 hover:text-blue-800 mr-3">
+                            编辑
+                        </button>
+                        <button onclick="deleteKeyword(${kw.id})" class="text-red-600 hover:text-red-800">
+                            删除
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch (error) {
+        console.error('加载关键词失败:', error);
+    }
+}
+
+function showAddKeywordModal() {
+    document.getElementById('modalTitle').textContent = '添加主题词';
+    document.getElementById('editKeywordId').value = '';
+    document.getElementById('keywordInput').value = '';
+    document.getElementById('keywordModal').classList.remove('hidden');
+}
+
+function editKeyword(id, keyword) {
+    document.getElementById('modalTitle').textContent = '编辑主题词';
+    document.getElementById('editKeywordId').value = id;
+    document.getElementById('keywordInput').value = keyword;
+    document.getElementById('keywordModal').classList.remove('hidden');
+}
+
+function closeKeywordModal() {
+    document.getElementById('keywordModal').classList.add('hidden');
+}
+
+document.getElementById('keywordForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const keywordId = document.getElementById('editKeywordId').value;
+    const keyword = document.getElementById('keywordInput').value.trim();
+    
+    if (!keyword) {
+        showToast('请输入主题词', 'error');
+        return;
+    }
+    
+    try {
+        let response;
+        if (keywordId) {
+            // 编辑
+            response = await fetch(`/api/keywords/${keywordId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword })
+            });
+        } else {
+            // 添加
+            response = await fetch('/api/keywords', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword })
+            });
+        }
+        
+        if (response.ok) {
+            showToast(keywordId ? '修改成功' : '添加成功');
+            closeKeywordModal();
+            loadKeywords();
+        } else {
+            const data = await response.json();
+            showToast(data.detail || '操作失败', 'error');
+        }
+    } catch (error) {
+        console.error('操作失败:', error);
+        showToast('操作失败', 'error');
+    }
+});
+
+async function deleteKeyword(id) {
+    if (!confirm('确定要删除这个主题词吗？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/keywords/${id}`, { method: 'DELETE' });
+        
+        if (response.ok) {
+            showToast('删除成功');
+            loadKeywords();
+        } else {
+            showToast('删除失败', 'error');
+        }
+    } catch (error) {
+        console.error('删除失败:', error);
+        showToast('删除失败', 'error');
+    }
+}
+
+// ==================== 定时任务设置 ====================
+
+async function loadSchedulerSettings() {
+    try {
+        const response = await fetch('/api/scheduler/settings');
+        const settings = await response.json();
+        
+        document.getElementById('intervalHours').value = settings.crawl_interval_hours || 1;
+        document.getElementById('schedulerEnabled').checked = settings.is_scheduler_enabled;
+        document.getElementById('msToken').value = settings.ms_token || '';
+        document.getElementById('aBogus').value = settings.a_bogus || '';
+        
+        updateSchedulerStatusText();
+    } catch (error) {
+        console.error('加载设置失败:', error);
+    }
+}
+
+async function loadSchedulerStatus() {
+    try {
+        const response = await fetch('/api/scheduler/status');
+        const status = await response.json();
+        
+        if (status.next_run_time) {
+            const nextRun = new Date(status.next_run_time).toLocaleString('zh-CN');
+            document.getElementById('nextRunTime').textContent = nextRun;
+        } else {
+            document.getElementById('nextRunTime').textContent = '未启用定时任务';
+        }
+    } catch (error) {
+        console.error('加载状态失败:', error);
+    }
+}
+
+function updateSchedulerStatusText() {
+    const enabled = document.getElementById('schedulerEnabled').checked;
+    document.getElementById('schedulerStatusText').textContent = enabled ? '已启用' : '已禁用';
+}
+
+document.getElementById('schedulerEnabled').addEventListener('change', updateSchedulerStatusText);
+
+document.getElementById('schedulerForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const settings = {
+        crawl_interval_hours: parseInt(document.getElementById('intervalHours').value),
+        is_scheduler_enabled: document.getElementById('schedulerEnabled').checked,
+        ms_token: document.getElementById('msToken').value.trim(),
+        a_bogus: document.getElementById('aBogus').value.trim()
+    };
+    
+    try {
+        const response = await fetch('/api/scheduler/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+        
+        if (response.ok) {
+            showToast('设置已保存');
+            loadSchedulerStatus();
+        } else {
+            showToast('保存失败', 'error');
+        }
+    } catch (error) {
+        console.error('保存设置失败:', error);
+        showToast('保存失败', 'error');
+    }
+});
+
+// ==================== 爬取功能 ====================
+
+async function loadCrawlKeywords() {
+    try {
+        const response = await fetch('/api/keywords');
+        const keywords = await response.json();
+        
+        const select = document.getElementById('crawlKeyword');
+        select.innerHTML = '<option value="">全部关键词</option>';
+        
+        keywords.forEach(kw => {
+            select.innerHTML += `<option value="${kw.keyword}">${kw.keyword}</option>`;
+        });
+    } catch (error) {
+        console.error('加载爬取关键词失败:', error);
+    }
+}
+
+async function startCrawl() {
+    const keyword = document.getElementById('crawlKeyword').value;
+    const startBtn = document.getElementById('startCrawlBtn');
+    
+    try {
+        const url = keyword ? `/api/crawl/manual?keyword=${encodeURIComponent(keyword)}` : '/api/crawl/manual';
+        const response = await fetch(url, { method: 'POST' });
+        
+        if (response.ok) {
+            showToast('爬取任务已启动');
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            
+            // 开始监听进度
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            progressInterval = setInterval(updateCrawlProgress, 1000);
+        } else {
+            const data = await response.json();
+            showToast(data.detail || '启动失败', 'error');
+        }
+    } catch (error) {
+        console.error('启动爬取失败:', error);
+        showToast('启动失败', 'error');
+    }
+}
+
+async function updateCrawlProgress() {
+    try {
+        const response = await fetch('/api/crawl/progress');
+        const progress = await response.json();
+        
+        // 更新状态
+        document.getElementById('crawlStatus').textContent = progress.is_running ? '爬取中...' : '等待开始';
+        document.getElementById('crawlKeywordName').textContent = progress.current_keyword || '';
+        document.getElementById('skillCount').textContent = progress.skills_found;
+        document.getElementById('currentPage').textContent = progress.current_page;
+        document.getElementById('crawlRunning').textContent = progress.is_running ? '运行中' : '未运行';
+        document.getElementById('crawlRunning').className = `text-2xl font-bold ${progress.is_running ? 'text-green-600' : 'text-purple-600'}`;
+        
+        // 更新进度条
+        const progressBar = document.getElementById('progressBar');
+        if (progress.is_running) {
+            progressBar.classList.add('progress-animated');
+        } else {
+            progressBar.classList.remove('progress-animated');
+        }
+        
+        // 更新日志
+        const logsContainer = document.getElementById('crawlLogs');
+        if (progress.logs && progress.logs.length > 0) {
+            logsContainer.innerHTML = progress.logs.map(log => `<div>${log}</div>`).join('');
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+        
+        // 如果爬取完成，停止轮询
+        if (!progress.is_running) {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            
+            const startBtn = document.getElementById('startCrawlBtn');
+            startBtn.disabled = false;
+            startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            // 重新加载文件树
+            loadFileTree();
+        }
+    } catch (error) {
+        console.error('获取进度失败:', error);
+    }
+}
+
+// ==================== 文件浏览 ====================
+
+async function loadFileTree() {
+    try {
+        const response = await fetch('/api/files/tree');
+        const files = await response.json();
+        
+        const fileTree = document.getElementById('fileTree');
+        
+        if (!files || files.length === 0) {
+            fileTree.innerHTML = '<div class="text-gray-500 text-center py-8">暂无文件，请先执行爬取</div>';
+            return;
+        }
+        
+        fileTree.innerHTML = renderFileTree(files);
+    } catch (error) {
+        console.error('加载文件树失败:', error);
+    }
+}
+
+function renderFileTree(items) {
+    let html = '';
+    
+    items.forEach(item => {
+        if (item.type === 'folder') {
+            html += `
+                <div class="tree-item py-1">
+                    <div onclick="toggleFolder(this)" class="flex items-center px-2 py-1 rounded hover:bg-gray-100">
+                        <span class="tree-toggle text-gray-400">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                            </svg>
+                        </span>
+                        <span class="text-yellow-500 mr-2">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
+                            </svg>
+                        </span>
+                        <span class="font-medium text-gray-700">${item.name}</span>
+                    </div>
+                    <div class="tree-children">
+                        ${item.children ? renderFileTree(item.children) : ''}
+                    </div>
+                </div>
+            `;
+        } else {
+            const fileSize = (item.size / 1024).toFixed(2) + ' KB';
+            html += `
+                <div class="tree-item py-1">
+                    <div onclick="downloadFile('${item.path}')" class="flex items-center px-2 py-1 rounded hover:bg-gray-100 ml-6">
+                        <span class="text-green-500 mr-2">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd"></path>
+                            </svg>
+                        </span>
+                        <span class="text-gray-700">${item.name}</span>
+                        <span class="ml-auto text-xs text-gray-400">${fileSize}</span>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    return html;
+}
+
+function toggleFolder(element) {
+    const toggle = element.querySelector('.tree-toggle');
+    const children = element.parentElement.querySelector('.tree-children');
+    
+    toggle.classList.toggle('expanded');
+    children.classList.toggle('expanded');
+}
+
+function downloadFile(path) {
+    window.open(`/api/files/download?path=${encodeURIComponent(path)}`, '_blank');
+}
+
+// ==================== 系统状态 ====================
+
+async function updateStatusInfo() {
+    try {
+        const [schedulerRes, crawlRes, historyRes] = await Promise.all([
+            fetch('/api/scheduler/status'),
+            fetch('/api/crawl/progress'),
+            fetch('/api/crawl/history?limit=1')
+        ]);
+        
+        const schedulerStatus = await schedulerRes.json();
+        const crawlStatus = await crawlRes.json();
+        const history = await historyRes.json();
+        
+        const lastCrawl = history.length > 0 ? history[0] : null;
+        
+        let statusHtml = `
+            <div class="flex justify-between items-center">
+                <span class="text-gray-600">定时任务:</span>
+                <span class="px-2 py-1 rounded-full text-xs ${schedulerStatus.is_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}">
+                    ${schedulerStatus.is_enabled ? '已启用' : '已禁用'}
+                </span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-gray-600">爬取状态:</span>
+                <span class="px-2 py-1 rounded-full text-xs ${crawlStatus.is_running ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}">
+                    ${crawlStatus.is_running ? '运行中' : '空闲'}
+                </span>
+            </div>
+        `;
+        
+        if (lastCrawl) {
+            const crawlStatusClass = lastCrawl.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+            statusHtml += `
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">上次爬取:</span>
+                    <span class="px-2 py-1 rounded-full text-xs ${crawlStatusClass}">
+                        ${lastCrawl.status === 'success' ? '成功' : '失败'}
+                    </span>
+                </div>
+            `;
+        }
+        
+        document.getElementById('statusInfo').innerHTML = statusHtml;
+    } catch (error) {
+        console.error('更新状态失败:', error);
+    }
+}
+
+// ==================== Token 管理功能 ====================
+
+async function refreshTokenStatus() {
+    try {
+        const response = await fetch('/api/token/status');
+        const data = await response.json();
+        
+        const statusValueEl = document.getElementById('tokenStatusValue');
+        if (statusValueEl) {
+            const statusText = data.status === 'running' ? '✅ 守护运行中' : 
+                               data.status === 'expired' ? '❌ 已过期' : '⏸️ 已停止';
+            statusValueEl.textContent = statusText;
+            statusValueEl.className = `text-sm ${
+                data.status === 'running' ? 'text-green-600' : 
+                data.status === 'expired' ? 'text-red-600' : 'text-gray-500'
+            }`;
+        }
+        
+        const previewEl = document.getElementById('tokenPreview');
+        if (previewEl) {
+            previewEl.textContent = data.token_preview || '无Token';
+            previewEl.className = 'text-sm font-mono text-gray-600';
+        }
+        
+        const validEl = document.getElementById('tokenValid');
+        if (validEl) {
+            if (data.is_valid) {
+                validEl.textContent = '✅ 有效';
+                validEl.className = 'text-sm text-green-600';
+            } else {
+                validEl.textContent = '❌ 无效';
+                validEl.className = 'text-sm text-red-600';
+            }
+        }
+        
+        const lastRefreshEl = document.getElementById('tokenLastRefresh');
+        if (lastRefreshEl) {
+            lastRefreshEl.textContent = data.last_refresh ? 
+                new Date(data.last_refresh).toLocaleString('zh-CN') : '-';
+            lastRefreshEl.className = 'text-sm text-gray-600';
+        }
+    } catch (error) {
+        console.error('获取Token状态失败:', error);
+    }
+}
+
+async function getInteractiveToken() {
+    if (!confirm('将启动浏览器进行交互式登录，确认继续？（此功能需要服务器支持playwright）')) {
+        return;
+    }
+    
+    showToast('正在启动浏览器...');
+    try {
+        const response = await fetch('/api/token/interactive', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Token获取成功！');
+            refreshTokenStatus();
+            // 同时更新设置页面的Token输入框
+            document.getElementById('msToken').value = data.status.token_preview ? 
+                data.status.token_preview.replace('...', '') : '';
+        } else {
+            showToast('Token获取失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('交互式获取Token失败:', error);
+        showToast('请求失败: ' + error.message, 'error');
+    }
+}
+
+async function refreshToken() {
+    try {
+        const response = await fetch('/api/token/refresh', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Token刷新成功！');
+            refreshTokenStatus();
+        } else {
+            showToast('Token刷新失败', 'error');
+        }
+    } catch (error) {
+        console.error('刷新Token失败:', error);
+        showToast('请求失败: ' + error.message, 'error');
+    }
+}
+
+async function setManualToken() {
+    const token = document.getElementById('manualToken').value.trim();
+    if (!token) {
+        showToast('请输入Token', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/token/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ms_token: token })
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Token已设置！');
+            document.getElementById('manualToken').value = '';
+            // 同时更新设置页面的Token输入框
+            document.getElementById('msToken').value = token;
+            refreshTokenStatus();
+        } else {
+            showToast('设置失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('设置Token失败:', error);
+        showToast('请求失败: ' + error.message, 'error');
+    }
+}

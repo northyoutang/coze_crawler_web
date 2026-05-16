@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 扣子技能爬取管理系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-800 min-h-screen flex items-center justify-center">
+    <div class="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4">
+        <div class="text-center mb-8">
+            <div class="w-16 h-16 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+                <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path>
+                </svg>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-800">扣子技能爬取管理系统</h1>
+            <p class="text-gray-500 mt-2">请登录以继续</p>
+        </div>
+
+        <form id="loginForm" class="space-y-6">
+            <div>
+                <label for="username" class="block text-sm font-medium text-gray-700 mb-2">用户名</label>
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                        </svg>
+                    </span>
+                    <input type="text" id="username" name="username" required
+                        class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none"
+                        placeholder="请输入用户名">
+                </div>
+            </div>
+
+            <div>
+                <label for="password" class="block text-sm font-medium text-gray-700 mb-2">密码</label>
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                    </span>
+                    <input type="password" id="password" name="password" required
+                        class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none"
+                        placeholder="请输入密码">
+                </div>
+            </div>
+
+            <div id="errorMessage" class="hidden text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">
+                用户名或密码错误
+            </div>
+
+            <button type="submit"
+                class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-indigo-600 hover:to-purple-700 focus:ring-4 focus:ring-indigo-300 transition-all transform hover:scale-[1.02]">
+                登录
+            </button>
+        </form>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        // 登录页面逻辑
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorMessage = document.getElementById('errorMessage');
+            
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                if (response.ok) {
+                    window.location.href = '/';
+                } else {
+                    errorMessage.classList.remove('hidden');
+                    setTimeout(() => {
+                        errorMessage.classList.add('hidden');
+                    }, 3000);
+                }
+            } catch (error) {
+                console.error('登录失败:', error);
+                errorMessage.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
