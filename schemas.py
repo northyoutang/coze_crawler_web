@@ -1,34 +1,31 @@
 """
-Pydantic模型（请求/响应校验）
+Pydantic 数据模型
 """
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List
 
 
+# 认证相关
 class LoginRequest(BaseModel):
-    """登录请求"""
     username: str
     password: str
 
 
+# 主题词相关
 class KeywordBase(BaseModel):
-    """主题词基础模型"""
     keyword: str
 
 
 class KeywordCreate(KeywordBase):
-    """创建主题词"""
     pass
 
 
 class KeywordUpdate(KeywordBase):
-    """更新主题词"""
     pass
 
 
 class KeywordResponse(KeywordBase):
-    """主题词响应"""
     id: int
     created_at: datetime
     updated_at: datetime
@@ -37,52 +34,50 @@ class KeywordResponse(KeywordBase):
         from_attributes = True
 
 
+# 爬取记录相关
 class CrawlRecordResponse(BaseModel):
-    """爬取记录响应"""
     id: int
     keyword: str
     file_path: str
     file_size: int
     skill_count: int
-    crawl_time: datetime
     status: str
+    crawl_time: datetime
 
     class Config:
         from_attributes = True
 
 
+# 调度器设置相关 - 简化版
 class SchedulerSettings(BaseModel):
-    """定时任务设置"""
-    crawl_interval_hours: int
-    is_scheduler_enabled: bool
-    ms_token: Optional[str] = ""
-    a_bogus: Optional[str] = ""
+    crawl_interval_hours: int = 1
+    is_scheduler_enabled: bool = True
 
 
+# 调度器状态
 class SchedulerStatus(BaseModel):
-    """定时任务状态"""
     is_enabled: bool
     interval_hours: int
-    next_run_time: Optional[str]
+    next_run_time: Optional[str] = None
     is_running: bool
 
 
+# 爬取进度
 class CrawlProgress(BaseModel):
-    """爬取进度"""
     is_running: bool
-    current_keyword: Optional[str]
+    current_keyword: Optional[str] = None
     current_page: int
-    total_pages: Optional[int]
+    total_pages: Optional[int] = None
     skills_found: int
-    logs: List[str]
+    logs: List[str] = []
 
 
+# 文件节点
 class FileNode(BaseModel):
-    """文件节点"""
     name: str
-    type: str  # folder/file
+    type: str  # 'folder' or 'file'
+    children: Optional[List['FileNode']] = None
     path: Optional[str] = None
-    children: Optional[List["FileNode"]] = None
     size: Optional[int] = None
     modified_time: Optional[str] = None
 

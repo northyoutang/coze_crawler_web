@@ -10,12 +10,9 @@ document.addEventListener('DOMContentLoaded', function() {
         loadSchedulerStatus();
         loadFileTree();
         updateStatusInfo();
-        refreshTokenStatus();  // 初始化Token状态
         
         // 每30秒更新一次状态
         setInterval(updateStatusInfo, 30000);
-        // 每分钟刷新Token状态
-        setInterval(refreshTokenStatus, 60000);
     }
 });
 
@@ -200,8 +197,6 @@ async function loadSchedulerSettings() {
         
         document.getElementById('intervalHours').value = settings.crawl_interval_hours || 1;
         document.getElementById('schedulerEnabled').checked = settings.is_scheduler_enabled;
-        document.getElementById('msToken').value = settings.ms_token || '';
-        document.getElementById('aBogus').value = settings.a_bogus || '';
         
         updateSchedulerStatusText();
     } catch (error) {
@@ -237,9 +232,7 @@ document.getElementById('schedulerForm').addEventListener('submit', async functi
     
     const settings = {
         crawl_interval_hours: parseInt(document.getElementById('intervalHours').value),
-        is_scheduler_enabled: document.getElementById('schedulerEnabled').checked,
-        ms_token: document.getElementById('msToken').value.trim(),
-        a_bogus: document.getElementById('aBogus').value.trim()
+        is_scheduler_enabled: document.getElementById('schedulerEnabled').checked
     };
     
     try {
@@ -478,123 +471,5 @@ async function updateStatusInfo() {
         document.getElementById('statusInfo').innerHTML = statusHtml;
     } catch (error) {
         console.error('更新状态失败:', error);
-    }
-}
-
-// ==================== Token 管理功能 ====================
-
-async function refreshTokenStatus() {
-    try {
-        const response = await fetch('/api/token/status');
-        const data = await response.json();
-        
-        const statusValueEl = document.getElementById('tokenStatusValue');
-        if (statusValueEl) {
-            const statusText = data.status === 'running' ? '✅ 守护运行中' : 
-                               data.status === 'expired' ? '❌ 已过期' : '⏸️ 已停止';
-            statusValueEl.textContent = statusText;
-            statusValueEl.className = `text-sm ${
-                data.status === 'running' ? 'text-green-600' : 
-                data.status === 'expired' ? 'text-red-600' : 'text-gray-500'
-            }`;
-        }
-        
-        const previewEl = document.getElementById('tokenPreview');
-        if (previewEl) {
-            previewEl.textContent = data.token_preview || '无Token';
-            previewEl.className = 'text-sm font-mono text-gray-600';
-        }
-        
-        const validEl = document.getElementById('tokenValid');
-        if (validEl) {
-            if (data.is_valid) {
-                validEl.textContent = '✅ 有效';
-                validEl.className = 'text-sm text-green-600';
-            } else {
-                validEl.textContent = '❌ 无效';
-                validEl.className = 'text-sm text-red-600';
-            }
-        }
-        
-        const lastRefreshEl = document.getElementById('tokenLastRefresh');
-        if (lastRefreshEl) {
-            lastRefreshEl.textContent = data.last_refresh ? 
-                new Date(data.last_refresh).toLocaleString('zh-CN') : '-';
-            lastRefreshEl.className = 'text-sm text-gray-600';
-        }
-    } catch (error) {
-        console.error('获取Token状态失败:', error);
-    }
-}
-
-async function getInteractiveToken() {
-    if (!confirm('将启动浏览器进行交互式登录，确认继续？（此功能需要服务器支持playwright）')) {
-        return;
-    }
-    
-    showToast('正在启动浏览器...');
-    try {
-        const response = await fetch('/api/token/interactive', { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast('Token获取成功！');
-            refreshTokenStatus();
-            // 同时更新设置页面的Token输入框
-            document.getElementById('msToken').value = data.status.token_preview ? 
-                data.status.token_preview.replace('...', '') : '';
-        } else {
-            showToast('Token获取失败: ' + (data.message || '未知错误'), 'error');
-        }
-    } catch (error) {
-        console.error('交互式获取Token失败:', error);
-        showToast('请求失败: ' + error.message, 'error');
-    }
-}
-
-async function refreshToken() {
-    try {
-        const response = await fetch('/api/token/refresh', { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast('Token刷新成功！');
-            refreshTokenStatus();
-        } else {
-            showToast('Token刷新失败', 'error');
-        }
-    } catch (error) {
-        console.error('刷新Token失败:', error);
-        showToast('请求失败: ' + error.message, 'error');
-    }
-}
-
-async function setManualToken() {
-    const token = document.getElementById('manualToken').value.trim();
-    if (!token) {
-        showToast('请输入Token', 'error');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/token/set', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ms_token: token })
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast('Token已设置！');
-            document.getElementById('manualToken').value = '';
-            // 同时更新设置页面的Token输入框
-            document.getElementById('msToken').value = token;
-            refreshTokenStatus();
-        } else {
-            showToast('设置失败: ' + (data.message || '未知错误'), 'error');
-        }
-    } catch (error) {
-        console.error('设置Token失败:', error);
-        showToast('请求失败: ' + error.message, 'error');
     }
 }

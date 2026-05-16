@@ -1,5 +1,5 @@
 """
-FastAPI主程序 - 扣子技能爬取管理系统
+FastAPI 主程序 - 扣子技能爬取管理系统（简化版，无需 msToken）
 """
 import os
 import datetime
@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-# from fastapi.templating import Jinja2Templates
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import threading
@@ -27,14 +27,13 @@ from scheduler import (
     init_scheduler, update_scheduler_settings, get_next_run_time,
     manual_crawl_task, get_crawl_progress, crawl_status
 )
-from token_keeper import token_keeper
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="扣子技能爬取管理系统", version="1.0.0")
+app = FastAPI(title="扣子技能爬取管理系统", version="2.0.0")
 
-# CORS中间件
+# CORS 中间件
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,7 +51,7 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# 修复Jinja2兼容性问题
+# 修复 Jinja2 兼容性问题
 from jinja2 import Environment, FileSystemLoader
 jinja_env = Environment(
     loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -84,8 +83,6 @@ def init_default_data():
             db.add(Setting(
                 crawl_interval_hours=1,
                 is_scheduler_enabled=True,
-                ms_token="",
-                a_bogus="",
             ))
             db.commit()
             print("已初始化默认设置")
@@ -102,9 +99,6 @@ async def startup_event():
     """启动事件"""
     init_default_data()
     init_scheduler()
-    # 启动Token守护（如果有保存的Token）
-    if token_keeper.current_token:
-        token_keeper.start()
 
 
 @app.on_event("shutdown")
@@ -112,7 +106,6 @@ async def shutdown_event():
     """关闭事件"""
     from scheduler import shutdown_scheduler
     shutdown_scheduler()
-    token_keeper.stop()
 
 
 # ==================== 页面路由 ====================
@@ -234,15 +227,13 @@ async def get_scheduler_settings(db: Session = Depends(get_db), auth: bool = Dep
     """获取定时任务设置"""
     setting = db.query(Setting).first()
     if not setting:
-        setting = Setting(crawl_interval_hours=1, is_scheduler_enabled=True, ms_token="", a_bogus="")
+        setting = Setting(crawl_interval_hours=1, is_scheduler_enabled=True)
         db.add(setting)
         db.commit()
         db.refresh(setting)
     return SchedulerSettings(
         crawl_interval_hours=setting.crawl_interval_hours,
         is_scheduler_enabled=setting.is_scheduler_enabled,
-        ms_token=setting.ms_token,
-        a_bogus=setting.a_bogus,
     )
 
 
@@ -256,8 +247,6 @@ async def update_settings(settings: SchedulerSettings, db: Session = Depends(get
 
     setting.crawl_interval_hours = settings.crawl_interval_hours
     setting.is_scheduler_enabled = settings.is_scheduler_enabled
-    setting.ms_token = settings.ms_token or ""
-    setting.a_bogus = settings.a_bogus or ""
     db.commit()
 
     # 更新调度器
@@ -278,61 +267,6 @@ async def get_scheduler_status(db: Session = Depends(get_db), auth: bool = Depen
         next_run_time=next_run,
         is_running=crawl_status["is_running"],
     )
-
-
-# ==================== Token管理接口 ====================
-
-@app.get("/api/token/status")
-async def get_token_status(auth: bool = Depends(require_auth)):
-    """获取Token状态"""
-    return token_keeper.get_status()
-
-
-@app.post("/api/token/refresh")
-async def refresh_token(auth: bool = Depends(require_auth)):
-    """手动触发Token刷新"""
-    success = token_keeper.heartbeat()
-    return {
-        "success": success,
-        "status": token_keeper.get_status()
-    }
-
-
-@app.post("/api/token/interactive")
-async def get_token_interactive(auth: bool = Depends(require_auth)):
-    """启动浏览器交互式获取Token"""
-    from crawler import CozeSkillCrawler
-    crawler = CozeSkillCrawler()
-    ms_token = crawler.get_ms_token_interactive()
-
-    if ms_token:
-        # 启动守护
-        token_keeper.start()
-        return {
-            "success": True,
-            "message": "Token获取成功",
-            "status": token_keeper.get_status()
-        }
-    else:
-        return {
-            "success": False,
-            "message": "Token获取失败"
-        }
-
-
-@app.post("/api/token/set")
-async def set_token(token_data: dict, auth: bool = Depends(require_auth)):
-    """手动设置Token"""
-    ms_token = token_data.get('ms_token', '')
-    if ms_token:
-        token_keeper.set_token(ms_token)
-        token_keeper.start()
-        return {
-            "success": True,
-            "message": "Token已设置",
-            "status": token_keeper.get_status()
-        }
-    return {"success": False, "message": "Token不能为空"}
 
 
 # ==================== 爬取接口 ====================
@@ -423,7 +357,7 @@ async def download_file(path: str, auth: bool = Depends(require_auth)):
         raise HTTPException(status_code=404, detail="文件不存在")
 
     if not file_path.endswith('.xlsx'):
-        raise HTTPException(status_code=400, detail="仅支持下载Excel文件")
+        raise HTTPException(status_code=400, detail="仅支持下载 Excel 文件")
 
     filename = os.path.basename(file_path)
     return FileResponse(

@@ -1,5 +1,5 @@
 """
-定时任务调度模块
+定时任务调度模块 - 简化版（无需 msToken）
 """
 import os
 import datetime
@@ -37,43 +37,26 @@ def log_crawl(message: str):
     print(log_msg)
 
 
-def crawl_keyword_task(keyword: str, ms_token: str, a_bogus: str = ""):
+def crawl_keyword_task(keyword: str):
     """
     爬取单个关键词的任务
 
     Args:
         keyword: 关键词
-        ms_token: Coze API msToken
-        a_bogus: Coze API a_bogus参数
     """
     db = SessionLocal()
     try:
         crawl_status["current_keyword"] = keyword
         crawl_status["logs"] = []
 
-        if not ms_token:
-            log_crawl("错误: msToken未配置，请先在设置中配置")
-            # 记录失败记录
-            record = CrawlRecord(
-                keyword=keyword,
-                file_path="",
-                file_size=0,
-                skill_count=0,
-                status="failed",
-            )
-            db.add(record)
-            db.commit()
-            return
-
-        # 创建爬虫实例
+        # 创建爬虫实例（无需 msToken）
         def progress_callback(log_msg):
             log_crawl(log_msg)
 
         crawler = CozeSkillCrawler(
-            ms_token=ms_token,
-            a_bogus=a_bogus if a_bogus else None,
             request_interval=2.0,
             progress_callback=progress_callback,
+            headless=True,
         )
 
         # 执行爬取
@@ -157,20 +140,11 @@ def scheduled_crawl_task():
             log_crawl("没有配置关键词，跳过爬取")
             return
 
-        # 获取设置
-        setting = db.query(Setting).first()
-        if not setting:
-            ms_token = ""
-            a_bogus = ""
-        else:
-            ms_token = setting.ms_token
-            a_bogus = setting.a_bogus
-
         log_crawl(f"定时爬取任务开始，共 {len(keywords)} 个关键词")
 
         # 逐个爬取
         for kw in keywords:
-            crawl_keyword_task(kw.keyword, ms_token, a_bogus)
+            crawl_keyword_task(kw.keyword)
 
         log_crawl("定时爬取任务完成")
 
@@ -186,7 +160,7 @@ def manual_crawl_task(keyword: Optional[str] = None) -> bool:
     手动触发爬取任务
 
     Args:
-        keyword: 指定关键词，None表示爬取所有关键词
+        keyword: 指定关键词，None 表示爬取所有关键词
 
     Returns:
         是否成功启动
@@ -202,15 +176,6 @@ def manual_crawl_task(keyword: Optional[str] = None) -> bool:
 
     db = SessionLocal()
     try:
-        # 获取设置
-        setting = db.query(Setting).first()
-        if not setting:
-            ms_token = ""
-            a_bogus = ""
-        else:
-            ms_token = setting.ms_token
-            a_bogus = setting.a_bogus
-
         # 获取关键词列表
         if keyword:
             keywords = [keyword]
@@ -226,7 +191,7 @@ def manual_crawl_task(keyword: Optional[str] = None) -> bool:
 
         # 逐个爬取
         for kw in keywords:
-            crawl_keyword_task(kw, ms_token, a_bogus)
+            crawl_keyword_task(kw)
 
         log_crawl("手动爬取任务完成")
 
@@ -257,8 +222,6 @@ def init_scheduler():
             setting = Setting(
                 crawl_interval_hours=1,
                 is_scheduler_enabled=True,
-                ms_token="",
-                a_bogus="",
             )
             db.add(setting)
             db.commit()
@@ -267,7 +230,7 @@ def init_scheduler():
         is_enabled = setting.is_scheduler_enabled
 
         if is_enabled:
-            # 添加定时任务 - 每interval_hours小时执行一次，整点开始
+            # 添加定时任务 - 每 interval_hours 小时执行一次，整点开始
             scheduler.add_job(
                 scheduled_crawl_task,
                 trigger=CronTrigger(hour=f'*/{interval_hours}', minute=0),

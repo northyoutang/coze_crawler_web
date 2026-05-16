@@ -1,17 +1,17 @@
 """
-爬虫模块 - 基于已有coze_skill_crawler改编
+爬虫模块 - 使用 Playwright 浏览器自动化方式，无需 msToken
 """
 import os
-import json
 import time
 import datetime
+import asyncio
 from typing import List, Dict, Optional, Callable, Any
-import requests
+from playwright.sync_api import sync_playwright, Page, Browser, Playwright, Response as PlaywrightResponse
 import pandas as pd
 
 
 class CozeSkillCrawler:
-    """扣子Skill商店爬虫类"""
+    """扣子Skill商店爬虫类 - Playwright浏览器自动化版本"""
 
     # 可用字段列表
     AVAILABLE_FIELDS = [
@@ -55,26 +55,22 @@ class CozeSkillCrawler:
 
     def __init__(
         self,
-        ms_token: str = None,
-        a_bogus: Optional[str] = None,
         request_interval: float = 2.0,
         progress_callback: Optional[Callable] = None,
+        headless: bool = True,
     ):
         """
         初始化爬虫
 
         Args:
-            ms_token: 可选的msToken参数
-            a_bogus: 可选的a_bogus参数（签名）
             request_interval: 请求间隔时间（秒）
             progress_callback: 进度回调函数
+            headless: 是否无头模式运行浏览器
         """
-        self.ms_token = ms_token
-        self.a_bogus = a_bogus
         self.request_interval = request_interval
-        self.base_url = "https://www.coze.cn/api/marketplace/product/list"
         self.progress_callback = progress_callback
-
+        self.headless = headless
+        
         # 默认提取核心字段
         self.fields = [
             'name', 'developer', 'user_count', 'heat', 'description',
@@ -82,24 +78,20 @@ class CozeSkillCrawler:
             'is_free', 'is_official', 'listed_at', 'price_amount', 'labels'
         ]
 
-        self.session = requests.Session()
-
-        # 模拟浏览器请求头
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Connection': 'keep-alive',
-            'Referer': 'https://www.coze.cn/store',
-            'Origin': 'https://www.coze.cn',
-        }
-
-        self.session.headers.update(self.headers)
+        # Playwright 相关对象
+        self.playwright: Optional[Playwright] = None
+        self.browser: Optional[Browser] = None
+        self.page: Optional[Page] = None
+        
+        # 运行状态
         self.skills_data = []
         self.current_page = 0
         self.total_pages = None
         self.is_running = False
         self.logs = []
+        
+        # 用于捕获 API 响应的数据
+        self._api_responses: List[Dict] = []
 
     def log(self, message: str):
         """记录日志"""
@@ -110,53 +102,60 @@ class CozeSkillCrawler:
             self.progress_callback(log_msg)
         print(log_msg)
 
-    def fetch_from_api(self, page_num: int = 1, page_size: int = 50, keyword: str = "") -> Optional[Dict]:
-        """
-        从API获取数据
-        """
+    def _handle_api_response(self, response: PlaywrightResponse):
+        """处理 API 响应，捕获技能列表数据"""
         try:
-            sort_type = '4' if keyword else '1'
+            # 只处理包含 product/list 的请求
+            if 'product/list' in response.url and response.status == 200:
+                data = response.json()
+                if data.get('code') == 0:
+                    self._api_responses.append(data)
+                    self.log(f"✅ 捕获 API 响应成功，URL: {response.url[:80]}...")
+        except Exception as e:
+            # 忽略解析错误，可能不是 JSON
+            pass
 
-            params = {
-                'entity_type': '11',
-                'sort_type': sort_type,
-                'page_num': str(page_num),
-                'page_size': str(page_size),
-                'keyword': keyword,
-            }
+    def start_browser(self):
+        """启动浏览器"""
+        try:
+            self.log("🚀 正在启动浏览器...")
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.chromium.launch(
+                headless=self.headless,
+                args=[
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled',
+                ]
+            )
+            
+            # 创建新页面，设置用户代理
+            context = self.browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
+            )
+            self.page = context.new_page()
+            
+            # 监听所有响应，捕获 API 数据
+            self.page.on('response', self._handle_api_response)
+            
+            self.log("✅ 浏览器启动成功")
+        except Exception as e:
+            self.log(f"❌ 浏览器启动失败: {str(e)}")
+            raise
 
-            if self.ms_token:
-                params['msToken'] = self.ms_token
-
-            if not keyword:
-                params['source'] = '1'
-
-            if self.a_bogus:
-                params['a_bogus'] = self.a_bogus
-
-            self.log(f"请求第 {page_num} 页...")
-            if keyword:
-                self.log(f"搜索关键词: '{keyword}'")
-
-            response = self.session.get(self.base_url, params=params, timeout=30)
-            self.log(f"响应状态码: {response.status_code}")
-
-            response.raise_for_status()
-            data = response.json()
-
-            has_more = data.get('data', {}).get('has_more', False)
-            self.log(f"是否还有下一页: {'是' if has_more else '否'}")
-
-            time.sleep(self.request_interval)
-
-            return data
-
-        except requests.exceptions.RequestException as e:
-            self.log(f"请求第 {page_num} 页失败: {str(e)}")
-            return None
-        except json.JSONDecodeError as e:
-            self.log(f"解析JSON响应失败: {str(e)}")
-            return None
+    def stop_browser(self):
+        """关闭浏览器"""
+        try:
+            if self.page:
+                self.page.close()
+            if self.browser:
+                self.browser.close()
+            if self.playwright:
+                self.playwright.stop()
+            self.log("✅ 浏览器已关闭")
+        except Exception as e:
+            self.log(f"⚠️  关闭浏览器时出错: {str(e)}")
 
     def extract_all_fields_from_item(self, item: Dict) -> Optional[Dict]:
         """
@@ -171,8 +170,8 @@ class CozeSkillCrawler:
             seller = meta_info.get('seller', {})
             user_info = meta_info.get('user_info', {})
             category = meta_info.get('category', {})
-            cases = skill_extra.get('cases', [])
-            user_label = user_info.get('user_label', {})
+            cases = skill_extra.get('cases', []) if skill_extra else []
+            user_label = user_info.get('user_label', {}) if user_info else {}
             price_info = meta_info.get('price', {})
 
             sku = skus[0] if skus else {}
@@ -186,13 +185,13 @@ class CozeSkillCrawler:
                 'entity_type': str(meta_info.get('entity_type', '')),
                 'entity_version': meta_info.get('entity_version', ''),
                 'status': str(meta_info.get('status', '')),
-                'category': category.get('name', ''),
-                'category_id': category.get('id', ''),
-                'category_index': str(category.get('index', '')),
-                'category_count': str(category.get('count', '')),
-                'category_icon': category.get('icon_url', ''),
-                'category_active_icon': category.get('active_icon_url', ''),
-                'user_count': str(skill_extra.get('installer_count', 0)) if skill_extra.get('installer_count') else '',
+                'category': category.get('name', '') if category else '',
+                'category_id': category.get('id', '') if category else '',
+                'category_index': str(category.get('index', '')) if category else '',
+                'category_count': str(category.get('count', '')) if category else '',
+                'category_icon': category.get('icon_url', '') if category else '',
+                'category_active_icon': category.get('active_icon_url', '') if category else '',
+                'user_count': str(skill_extra.get('installer_count', 0)) if skill_extra and skill_extra.get('installer_count') else '',
                 'heat': str(meta_info.get('heat', '')) if meta_info.get('heat') else '',
                 'favorite_count': str(meta_info.get('favorite_count', 0)) if meta_info.get('favorite_count') is not None else '',
                 'is_free': '是' if meta_info.get('is_free', False) else '否',
@@ -207,16 +206,16 @@ class CozeSkillCrawler:
                 'readme': meta_info.get('readme', ''),
                 'introduction_format': str(meta_info.get('introduction', {}).get('format', '')),
                 'introduction_content': meta_info.get('introduction', {}).get('introduction', ''),
-                'seller_id': seller.get('id', ''),
-                'seller_name': seller.get('name', ''),
-                'seller_avatar': seller.get('avatar_url', ''),
-                'user_id': user_info.get('user_id', ''),
-                'user_name': user_info.get('user_name', ''),
-                'user_avatar': user_info.get('avatar_url', ''),
-                'user_label_id': user_label.get('label_id', ''),
-                'user_label_name': user_label.get('label_name', ''),
-                'user_label_icon': user_label.get('icon_url', '') or user_label.get('icon_uri', ''),
-                'user_label_jump': user_label.get('jump_link', ''),
+                'seller_id': seller.get('id', '') if seller else '',
+                'seller_name': seller.get('name', '') if seller else '',
+                'seller_avatar': seller.get('avatar_url', '') if seller else '',
+                'user_id': user_info.get('user_id', '') if user_info else '',
+                'user_name': user_info.get('user_name', '') if user_info else '',
+                'user_avatar': user_info.get('avatar_url', '') if user_info else '',
+                'user_label_id': user_label.get('label_id', '') if user_label else '',
+                'user_label_name': user_label.get('label_name', '') if user_label else '',
+                'user_label_icon': (user_label.get('icon_url', '') or user_label.get('icon_uri', '')) if user_label else '',
+                'user_label_jump': user_label.get('jump_link', '') if user_label else '',
                 'case_name_1': cases[0].get('name', '') if len(cases) > 0 else '',
                 'case_url_1': cases[0].get('task_url', '') if len(cases) > 0 else '',
                 'case_image_1': cases[0].get('image_url', '') if len(cases) > 0 else '',
@@ -226,16 +225,16 @@ class CozeSkillCrawler:
                 'case_name_3': cases[2].get('name', '') if len(cases) > 2 else '',
                 'case_url_3': cases[2].get('task_url', '') if len(cases) > 2 else '',
                 'case_image_3': cases[2].get('image_url', '') if len(cases) > 2 else '',
-                'show_version': skill_extra.get('show_version', ''),
-                'publish_mode': str(skill_extra.get('publish_mode', '')),
+                'show_version': skill_extra.get('show_version', '') if skill_extra else '',
+                'publish_mode': str(skill_extra.get('publish_mode', '')) if skill_extra else '',
                 'has_installed': '是' if skill_extra.get('has_installed', False) else '否',
                 'has_enabled': '是' if skill_extra.get('has_enabled', False) else '否',
                 'is_reach_max_enabled_limit': '是' if skill_extra.get('is_reach_max_enabled_limit', False) else '否',
                 'support_build_leads': '是' if build_setting.get('support_build_leads', False) else '否',
-                'commercial_type': str(commercial_setting.get('commercial_type', '')),
-                'sku_id': sku.get('id', ''),
-                'sku_description': sku.get('description', ''),
-                'sku_price_type': str(sku.get('price_type', '')),
+                'commercial_type': str(commercial_setting.get('commercial_type', '')) if commercial_setting else '',
+                'sku_id': sku.get('id', '') if sku else '',
+                'sku_description': sku.get('description', '') if sku else '',
+                'sku_price_type': str(sku.get('price_type', '')) if sku else '',
                 'price_amount': str(float(price_info.get('amount', 0)) / 100) if price_info and price_info.get('amount') else '',
                 'price_currency': str(price_info.get('currency', '')) if price_info else '',
                 'price_decimal_num': str(price_info.get('decimal_num', '')) if price_info else '',
@@ -245,19 +244,19 @@ class CozeSkillCrawler:
 
             # 提取开发者名称
             developer = (
-                skill_extra.get('developer', '') or
-                skill_extra.get('author', '') or
-                skill_extra.get('creator', '') or
+                (skill_extra.get('developer', '') if skill_extra else '') or
+                (skill_extra.get('author', '') if skill_extra else '') or
+                (skill_extra.get('creator', '') if skill_extra else '') or
                 meta_info.get('developer', '') or
                 meta_info.get('author', '') or
                 meta_info.get('creator', '') or
                 item.get('developer', '') or
                 item.get('author', '') or
                 item.get('creator', '') or
-                user_info.get('name', '') or
-                user_info.get('nickname', '') or
-                user_info.get('username', '') or
-                seller.get('name', '')
+                (user_info.get('name', '') if user_info else '') or
+                (user_info.get('nickname', '') if user_info else '') or
+                (user_info.get('username', '') if user_info else '') or
+                (seller.get('name', '') if seller else '')
             )
             all_fields['developer'] = str(developer) if developer else ''
 
@@ -272,23 +271,23 @@ class CozeSkillCrawler:
 
     def parse_skills_from_json(self, data: Dict) -> List[Dict]:
         """
-        从API返回的JSON数据中解析skill列表
+        从 API 返回的 JSON 数据中解析 skill 列表
         """
         skills = []
 
         try:
             if data.get('code') != 0:
-                self.log(f"API返回错误: code={data.get('code')}")
+                self.log(f"API 返回错误: code={data.get('code')}")
                 return skills
 
             response_data = data.get('data', {})
             products = response_data.get('products', [])
 
             if not products:
-                self.log("未在响应中找到products列表")
+                self.log("未在响应中找到 products 列表")
                 return skills
 
-            self.log(f"从API响应中找到 {len(products)} 个skill")
+            self.log(f"从 API 响应中找到 {len(products)} 个 skill")
 
             for item in products:
                 skill_info = self.extract_all_fields_from_item(item)
@@ -296,10 +295,12 @@ class CozeSkillCrawler:
                     filtered_skill = {k: v for k, v in skill_info.items() if k in self.fields}
                     skills.append(filtered_skill)
 
-            self.log(f"成功解析 {len(skills)} 个skill")
+            self.log(f"成功解析 {len(skills)} 个 skill")
 
         except Exception as e:
-            self.log(f"解析skill列表失败: {str(e)}")
+            self.log(f"解析 skill 列表失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
         return skills
 
@@ -307,70 +308,181 @@ class CozeSkillCrawler:
         self,
         keyword: str,
         max_pages: Optional[int] = None,
-        page_size: int = 50,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> List[Dict]:
         """
-        爬取指定关键词的所有skill
+        爬取指定关键词的所有 skill（使用浏览器自动化）
 
         Args:
             keyword: 搜索关键词
-            max_pages: 最大爬取页数，None表示爬取所有页
-            page_size: 每页数量
-            progress_callback: 进度回调函数(当前进度, 总数, 状态信息)
+            max_pages: 最大爬取页数，None 表示爬取所有页
 
         Returns:
-            所有skill信息列表
+            所有 skill 信息列表
         """
         self.is_running = True
         self.current_page = 0
         all_skills = []
-
-        page_num = 1
-        while True:
-            if max_pages is not None and page_num > max_pages:
-                self.log(f"已达到最大页数限制: {max_pages}")
-                break
-
-            self.current_page = page_num
-
-            # 调用进度回调
-            if progress_callback:
-                progress_callback(page_num, max_pages or 0, f"正在爬取第 {page_num} 页...")
-
-            response_data = self.fetch_from_api(page_num, page_size, keyword)
-
-            if not response_data:
-                self.log(f"第 {page_num} 页获取失败，停止爬取")
-                break
-
-            skills = self.parse_skills_from_json(response_data)
-
-            if not skills:
-                self.log(f"第 {page_num} 页没有找到skill，停止爬取")
-                break
-
-            all_skills.extend(skills)
-            self.log(f"第 {page_num} 页获取到 {len(skills)} 个skill，累计: {len(all_skills)} 个")
-
-            # 检查是否还有下一页
-            has_more = response_data.get('data', {}).get('has_more', False)
-            if not has_more:
-                self.log("所有页面爬取完成")
-                break
-
-            page_num += 1
-
-        # 完成时调用进度回调
-        if progress_callback:
-            progress_callback(page_num - 1, max_pages or (page_num - 1), f"爬取完成，共获取 {len(all_skills)} 个技能")
-
-        self.is_running = False
+        self._api_responses = []
+        
+        try:
+            self.start_browser()
+            self.log(f"🔍 开始搜索关键词: {keyword}")
+            
+            # 访问技能商店页面
+            self.log("🌐 正在访问扣子技能商店...")
+            self.page.goto("https://www.coze.cn/skills?tab=space", wait_until="networkidle", timeout=60000)
+            time.sleep(2)
+            
+            # 尝试多种可能的搜索框选择器
+            search_selectors = [
+                'input[placeholder*="搜索"]',
+                'input[placeholder*="skill"]',
+                'input[type="search"]',
+                '.search-input input',
+            ]
+            
+            search_input = None
+            for selector in search_selectors:
+                try:
+                    search_input = self.page.wait_for_selector(selector, timeout=5000)
+                    if search_input:
+                        self.log(f"✅ 找到搜索框，选择器: {selector}")
+                        break
+                except:
+                    continue
+            
+            if not search_input:
+                self.log("⚠️  未找到搜索框，尝试直接使用搜索 URL")
+                # 直接跳转到搜索 URL
+                encoded_keyword = keyword.replace(' ', '%20')
+                search_url = f"https://www.coze.cn/skills?keyword={encoded_keyword}&tab=space"
+                self.page.goto(search_url, wait_until="networkidle", timeout=60000)
+                time.sleep(3)
+            else:
+                # 输入关键词并搜索
+                self.log(f"⌨️  正在输入关键词: {keyword}")
+                search_input.fill(keyword)
+                time.sleep(1)
+                
+                # 按回车键搜索
+                search_input.press("Enter")
+                self.log("🔄 提交搜索请求...")
+            
+            # 等待搜索结果加载
+            time.sleep(5)
+            
+            # 检查是否已经捕获到第一页数据
+            if not self._api_responses:
+                self.log("⚠️  等待 API 响应...")
+                # 滚动页面触发更多加载
+                self.page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                time.sleep(3)
+            
+            # 解析第一页数据
+            if self._api_responses:
+                data = self._api_responses[0]
+                skills = self.parse_skills_from_json(data)
+                all_skills.extend(skills)
+                self.current_page = 1
+                self.log(f"📄 第 1 页爬取完成，获得 {len(skills)} 个技能")
+                
+                # 检查是否有更多页面
+                has_more = data.get('data', {}).get('has_more', False)
+                
+                # 继续翻页
+                page_num = 2
+                while has_more and (max_pages is None or page_num <= max_pages):
+                    time.sleep(self.request_interval)
+                    
+                    # 滚动到页面底部触发加载更多
+                    self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    
+                    # 等待新的 API 响应
+                    start_time = time.time()
+                    got_response = False
+                    
+                    while time.time() - start_time < 10:  # 最多等待10秒
+                        if len(self._api_responses) >= page_num:
+                            got_response = True
+                            break
+                        time.sleep(0.5)
+                    
+                    if got_response:
+                        data = self._api_responses[page_num - 1]
+                        skills = self.parse_skills_from_json(data)
+                        all_skills.extend(skills)
+                        self.current_page = page_num
+                        self.log(f"📄 第 {page_num} 页爬取完成，获得 {len(skills)} 个技能，累计: {len(all_skills)}")
+                        has_more = data.get('data', {}).get('has_more', False)
+                        page_num += 1
+                    else:
+                        self.log(f"⚠️  第 {page_num} 页未能获取响应，停止爬取")
+                        break
+            else:
+                self.log("❌ 未能捕获 API 响应，尝试直接从页面提取数据")
+                
+                # 备用方案：尝试从页面 DOM 中提取数据
+                skills = self._extract_skills_from_page()
+                if skills:
+                    all_skills.extend(skills)
+                    self.log(f"📄 从页面提取到 {len(skills)} 个技能")
+            
+            self.log(f"✅ 关键词 '{keyword}' 爬取完成，共获取 {len(all_skills)} 个技能")
+            
+        except Exception as e:
+            self.log(f"❌ 爬取过程出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.stop_browser()
+            self.is_running = False
+        
         return all_skills
+
+    def _extract_skills_from_page(self) -> List[Dict]:
+        """
+        备用方法：直接从页面 DOM 中提取技能数据
+        """
+        skills = []
+        try:
+            # 查找技能卡片
+            cards = self.page.query_selector_all('[class*="card"], [class*="skill"], [class*="product"]')
+            self.log(f"找到 {len(cards)} 个可能的技能卡片")
+            
+            for card in cards[:50]:  # 限制数量避免超时
+                try:
+                    name = card.query_selector('h3, [class*="title"], [class*="name"]')
+                    desc = card.query_selector('[class*="desc"], [class*="description"]')
+                    
+                    if name:
+                        skill = {
+                            'name': name.inner_text().strip() if name else '',
+                            'description': desc.inner_text().strip() if desc else '',
+                            'developer': '',
+                            'user_count': '',
+                            'heat': '',
+                            'category': '',
+                            'show_version': '',
+                            'favorite_count': '',
+                            'is_free': '',
+                            'is_official': '',
+                            'listed_at': '',
+                            'price_amount': '',
+                            'labels': '',
+                        }
+                        if skill['name']:
+                            skills.append(skill)
+                except:
+                    continue
+                    
+        except Exception as e:
+            self.log(f"从页面提取数据失败: {str(e)}")
+        
+        return skills
 
     def save_to_excel(self, skills: List[Dict[str, Any]], keyword: str):
         """
-        保存为Excel格式
+        保存为 Excel 格式
 
         文件名格式：{keyword}-{YYYYMMDD}-{HH}-{MM}-{SS}.xlsx
         存储路径：data/{keyword}/{YYYYMMDD}/
@@ -405,81 +517,13 @@ class CozeSkillCrawler:
             df.to_excel(filename, index=False, engine='openpyxl')
 
             file_size = os.path.getsize(filename)
-            self.log(f"数据已保存到: {filename}")
-            self.log(f"文件大小: {file_size} 字节，共 {len(skills)} 条记录")
+            self.log(f"💾 数据已保存到: {filename}")
+            self.log(f"📊 文件大小: {file_size} 字节，共 {len(skills)} 条记录")
 
             return filename, len(skills)
 
         except Exception as e:
-            self.log(f"保存Excel文件失败: {str(e)}")
+            self.log(f"❌ 保存 Excel 文件失败: {str(e)}")
             import traceback
             traceback.print_exc()
             return None, 0
-
-    def get_ms_token_interactive(self) -> str:
-        """
-        交互式获取msToken（人工辅助登录）
-        返回: 获取到的msToken
-        """
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            self.log("playwright未安装，请先安装: pip install playwright && playwright install chromium")
-            return ""
-        
-        print("=" * 60)
-        print("正在启动浏览器进行交互式登录...")
-        print("请在浏览器中手动完成登录操作")
-        print("登录成功后浏览器会自动关闭")
-        print("=" * 60)
-        
-        with sync_playwright() as p:
-            # 启动可见的浏览器
-            browser = p.chromium.launch(headless=False)
-            context = browser.new_context()
-            page = context.new_page()
-            
-            # 访问主页
-            page.goto("https://www.coze.cn")
-            
-            # 等待用户登录（等待跳转到首页或工作台）
-            try:
-                # 等待URL变化表示登录成功
-                page.wait_for_url(
-                    lambda url: "home" in url or "store" in url or "workspace" in url,
-                    timeout=300000  # 5分钟超时
-                )
-                
-                # 等待一下确保Token已设置
-                page.wait_for_timeout(2000)
-                
-                # 从LocalStorage获取msToken
-                ms_token = page.evaluate("""() => {
-                    return localStorage.getItem('msToken') || 
-                           sessionStorage.getItem('msToken') ||
-                           '';
-                }""")
-                
-                # 同时获取完整的Cookie
-                cookies = context.cookies()
-                
-                browser.close()
-                
-                if ms_token:
-                    print(f"✓ 成功获取msToken")
-                    print(f"Token预览: {ms_token[:30]}...")
-                    print(f"获取到 {len(cookies)} 个Cookie")
-                    
-                    # 保存到TokenKeeper
-                    from token_keeper import token_keeper
-                    token_keeper.set_token(ms_token, cookies)
-                    
-                    return ms_token
-                else:
-                    print("✗ 未能获取到msToken")
-                    return ""
-                    
-            except Exception as e:
-                print(f"获取Token超时或失败: {e}")
-                browser.close()
-                return ""
