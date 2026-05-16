@@ -314,7 +314,11 @@ def scan_directory(path: str, relative_path: str = ""):
     try:
         for item in sorted(os.listdir(path)):
             item_path = os.path.join(path, item)
-            item_relative = os.path.join(relative_path, item) if relative_path else item
+            # 构建相对路径，确保使用正斜杠 / 用于 URL
+            if relative_path:
+                item_relative = relative_path + "/" + item
+            else:
+                item_relative = item
 
             if os.path.isdir(item_path):
                 children.append(FileNode(
@@ -351,10 +355,16 @@ async def get_file_tree(auth: bool = Depends(require_auth)):
 @app.get("/api/files/download")
 async def download_file(path: str, auth: bool = Depends(require_auth)):
     """下载文件"""
-    file_path = os.path.join("data", path) if not path.startswith("data") else path
+    # 将 URL 路径的正斜杠转换为系统路径
+    normalized_path = path.replace('/', os.sep)
+    file_path = os.path.join("data", normalized_path) if not normalized_path.startswith("data") else normalized_path
 
+    print(f"下载请求 - path参数: {path}")
+    print(f"下载请求 - 文件路径: {file_path}")
+    
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
+        print(f"错误: 文件不存在 {file_path}")
+        raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
 
     if not file_path.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail="仅支持下载 Excel 文件")
