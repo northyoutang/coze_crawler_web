@@ -377,15 +377,17 @@ function renderFileTree(items) {
     
     items.forEach(item => {
         if (item.type === 'folder') {
-            const isEmpty = !item.children || item.children.length === 0;
+            const hasChildren = item.children && item.children.length > 0;
             html += `
                 <div class="tree-item py-1">
                     <div class="flex items-center px-2 py-1 rounded hover:bg-gray-100">
                         <div onclick="toggleFolder(this)" class="flex items-center flex-1">
                             <span class="tree-toggle text-gray-400">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                ${hasChildren ? `
+                                <svg class="w-4 h-4" style="transform: rotate(0deg); transition: transform 0.2s;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                 </svg>
+                                ` : `<span class="w-4 inline-block"></span>`}
                             </span>
                             <span class="text-yellow-500 mr-2">
                                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -394,22 +396,19 @@ function renderFileTree(items) {
                             </span>
                             <span class="font-medium text-gray-700">${item.name}</span>
                         </div>
-                        ${isEmpty ? `<button onclick="deleteFileOrFolder('${item.path}', 'folder', event)" class="text-red-500 hover:text-red-700 p-1" title="删除空目录">🗑️</button>` : ''}
                     </div>
-                    <div class="tree-children">
-                        ${item.children ? renderFileTree(item.children) : ''}
-                    </div>
+                    ${hasChildren ? `<div class="tree-children ml-6" style="display: none;">${renderFileTree(item.children)}</div>` : ''}
                 </div>
             `;
         } else {
-            const fileSize = (item.size / 1024).toFixed(2) + ' KB';
+            const fileSize = item.size ? (item.size / 1024).toFixed(2) + ' KB' : '';
             html += `
                 <div class="tree-item py-1">
                     <div class="flex items-center px-2 py-1 rounded hover:bg-gray-100 ml-6">
-                        <div onclick="downloadFile('${item.path}')" class="flex items-center flex-1">
+                        <div onclick="downloadFile('${item.path}')" class="flex items-center flex-1 cursor-pointer">
                             <span class="text-green-500 mr-2">
                                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd"></path>
+                                    <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
                                 </svg>
                             </span>
                             <span class="text-gray-700">${item.name}</span>
@@ -455,11 +454,23 @@ async function deleteFileOrFolder(path, type, event) {
 }
 
 function toggleFolder(element) {
-    const toggle = element.querySelector('.tree-toggle');
-    const children = element.parentElement.querySelector('.tree-children');
-    
-    toggle.classList.toggle('expanded');
-    children.classList.toggle('expanded');
+    if (!element) return;
+
+    const svgIcon = element.querySelector('.tree-toggle svg');
+    const treeItem = element.closest('.tree-item');
+    if (!treeItem) return;
+
+    const children = treeItem.querySelector('.tree-children');
+    if (!children) return;
+
+    // 🔴 用 style.display 代替 classList，不需要依赖 CSS
+    if (children.style.display === 'none' || children.style.display === '') {
+        children.style.display = 'block';
+        if (svgIcon) svgIcon.style.transform = 'rotate(90deg)';
+    } else {
+        children.style.display = 'none';
+        if (svgIcon) svgIcon.style.transform = 'rotate(0deg)';
+    }
 }
 
 function downloadFile(path) {

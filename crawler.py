@@ -110,7 +110,8 @@ class CozeSkillCrawler:
                 data = response.json()
                 if data.get('code') == 0:
                     self._api_responses.append(data)
-                    self.log(f"✅ 捕获 API 响应成功，URL: {response.url[:80]}...")
+                    #self.log(f"✅ 捕获 API 响应成功，URL: {response.url[:8000]}...")
+                    self.log(f"✅ 捕获 API 响应成功，URL: {response.url}")
         except Exception as e:
             # 忽略解析错误，可能不是 JSON
             pass

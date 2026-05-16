@@ -148,3 +148,7 @@ tbody tr:hover {
     background-color: #dbeafe;
     color: #1e40af;
 }
+
+.hidden {
+    display: none !important;
+}
