@@ -61,7 +61,7 @@ def crawl_keyword_task(keyword: str):
 
         # 执行爬取
         log_crawl(f"开始爬取关键词: {keyword}")
-        skills = crawler.crawl_keyword(keyword=keyword, max_pages=None)
+        skills = crawler.crawl_keyword(keyword=keyword, max_scroll=15)
 
         crawl_status["skills_found"] = len(skills)
         log_crawl(f"关键词 '{keyword}' 爬取完成，共获取 {len(skills)} 个技能")
